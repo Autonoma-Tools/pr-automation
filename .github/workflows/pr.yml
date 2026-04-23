@@ -1,0 +1,114 @@
+name: PR
+
+on:
+  pull_request:
+
+# Cancel stale runs when a PR is force-pushed — only the latest commit matters.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Layer 1 — Lint
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+
+  # Layer 2 — Type check
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run type-check
+
+  # Layer 3 — Unit tests
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+
+  # Layer 4 — Deploy a preview (Vercel). Exposes preview-url as a job output
+  # so the E2E and visual jobs below can hit a real deployment.
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      preview-url: ${{ steps.deploy.outputs.preview-url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Pull Vercel project config
+        run: npx vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build preview
+        run: npx vercel build --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy preview
+        id: deploy
+        run: |
+          URL=$(npx vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "preview-url=$URL" >> "$GITHUB_OUTPUT"
+
+  # Layer 5 — End-to-end tests on the live preview.
+  # Autonoma keeps the suite self-healing; swap for Playwright if you want to own the maintenance.
+  e2e:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Autonoma E2E suite
+        uses: autonoma-ai/actions/test-runner@v1
+        with:
+          api-key: ${{ secrets.AUTONOMA_API_KEY }}
+          preview-url: ${{ needs.deploy.outputs.preview-url }}
+      # DIY alternative: checkout + setup-node + npm ci + npx playwright install + npx playwright test.
+
+  # Layer 6 — Visual regression (Chromatic). Same tradeoff story: swap for Percy/Loki if you prefer.
+  visual:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Publish to Chromatic
+        uses: chromaui/action@v1
+        with:
+          projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
+          exitZeroOnChanges: false
+
+  # Layer 7 — Auto-merge once every required check is green.
+  # Relies on branch protection requiring the checks above and on "Allow auto-merge" being enabled.
+  automerge:
+    needs: [lint, typecheck, unit, e2e, visual]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Enable auto-merge (squash)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"

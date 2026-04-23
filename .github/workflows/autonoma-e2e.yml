@@ -1,0 +1,39 @@
+name: Autonoma E2E
+
+# Fire when the preview deployment finishes, so we only test a URL that actually exists.
+on:
+  deployment_status:
+
+jobs:
+  e2e:
+    # Only run when the deployment succeeded and we have a preview URL to hit.
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Autonoma E2E suite against preview
+        uses: autonoma-ai/actions/test-runner@v1
+        with:
+          api-key: ${{ secrets.AUTONOMA_API_KEY }}
+          preview-url: ${{ github.event.deployment_status.environment_url }}
+
+# ---------------------------------------------------------------------------
+# DIY Playwright alternative (for reference)
+# ---------------------------------------------------------------------------
+# Swap the job above for the block below if you want to own the full stack.
+# Trade-off: every UI change, new flow, and flaky selector is now your problem.
+#
+# jobs:
+#   e2e:
+#     if: github.event.deployment_status.state == 'success'
+#     runs-on: ubuntu-latest
+#     env:
+#       PREVIEW_URL: ${{ github.event.deployment_status.environment_url }}
+#     steps:
+#       - uses: actions/checkout@v4
+#       - uses: actions/setup-node@v4
+#         with:
+#           node-version: 20
+#           cache: npm
+#       - run: npm ci
+#       - run: npx playwright install --with-deps
+#       - run: npx playwright test
