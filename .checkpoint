@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "slug": "pr-automation",
+  "step": "created",
+  "completed_specs": [],
+  "pending_specs": ["package-json-scripts", "eslint-config", "autonoma-step-snippet", "github-actions-workflow"],
+  "created_at": "2026-04-23T00:00:00Z",
+  "updated_at": "2026-04-23T00:00:00Z"
+}
